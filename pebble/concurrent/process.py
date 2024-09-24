@@ -17,6 +17,7 @@
 import os
 import types
 import multiprocessing
+from functools import wraps, partial
 
 from itertools import count
 from functools import wraps
@@ -49,6 +50,29 @@ def process(*args, **kwargs) -> Callable:
     return common.decorate_function(_process_wrapper, *args, **kwargs)
 
 
+def terminate(process: multiprocessing.Process, timeout: int):
+    """Modified stop_process to use a different join timeout."""
+
+    print("before join is_alive: %s name: %s exitcode: %s" % (process.name, str(process.is_alive()), str(process.exitcode)))
+    process.terminate()
+    process.join(timeout)
+
+    print("after join is_alive: %s name: %s exitcode: %s" % (process.name, str(process.is_alive()), str(process.exitcode)))
+
+    print("Terminating process %s (PID: %s) with timeout %d" % (process.name, process.ident, timeout))
+
+    if process.exitcode is None and os.name != 'nt':
+        try:
+            print("Failed to gracefully terminate, killing process %s" % process.name)
+            process.kill()
+            process.join()
+        except OSError:
+            return
+
+    if process.exitcode is None:
+        raise RuntimeError("Unable to terminate process %s (PID: %s)" % (process.name, process.ident))
+
+
 def _process_wrapper(
         function: Callable,
         name: str,
@@ -75,6 +99,9 @@ def _process_wrapper(
             target, args, kwargs, (reader, writer))
 
         writer.close()
+
+        future.terminate = partial(terminate, worker)
+        future.name = name
 
         future.set_running_or_notify_cancel()
 
